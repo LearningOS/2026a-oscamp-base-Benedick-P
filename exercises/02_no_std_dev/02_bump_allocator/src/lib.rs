@@ -1,12 +1,12 @@
-//! # Bump Allocator (no_std)
+//! # Bump 分配器（no_std）
 //!
-//! Implement the simplest heap memory allocator: a Bump Allocator (bump pointer allocator).
+//! 实现最简单的堆内存分配器：Bump Allocator（指针递增分配器）。
 //!
-//! ## How It Works
+//! ## 工作原理
 //!
-//! A Bump Allocator maintains a pointer `next` to the "next available address".
-//! On each allocation, it aligns `next` to the requested alignment, then advances by `size` bytes.
-//! It does not support freeing individual objects (`dealloc` is a no-op).
+//! Bump 分配器维护一个指向“下一个可用地址”的指针 `next`。
+//! 每次分配时，它先把 `next` 按请求的对齐值对齐，再前进 `size` 字节。
+//! 它不支持单独释放对象（`dealloc` 是空操作）。
 //!
 //! ```text
 //! heap_start                              heap_end
@@ -15,19 +15,19 @@
 //!                                    next allocation starts here
 //! ```
 //!
-//! ## Task
+//! ## 任务
 //!
-//! Implement `BumpAllocator`'s `GlobalAlloc::alloc` method:
-//! 1. Align the current `next` up to `layout.align()`
-//!    Hint: `align_up(addr, align) = (addr + align - 1) & !(align - 1)`
-//! 2. Check if the aligned address plus `layout.size()` exceeds `heap_end`
-//! 3. If it exceeds, return `null_mut()`; otherwise atomically update `next` with `compare_exchange`
+//! 实现 `BumpAllocator` 的 `GlobalAlloc::alloc` 方法：
+//! 1. 把当前的 `next` 向上对齐到 `layout.align()`
+//!    提示：`align_up(addr, align) = (addr + align - 1) & !(align - 1)`
+//! 2. 检查对齐后的地址加上 `layout.size()` 是否超过 `heap_end`
+//! 3. 若超过，返回 `null_mut()`；否则用 `compare_exchange` 原子地更新 `next`
 //!
-//! ## Key Concepts
+//! ## 关键概念
 //!
 //! - `core::alloc::{GlobalAlloc, Layout}`
-//! - Memory alignment calculation
-//! - `AtomicUsize` and `compare_exchange` (CAS loop)
+//! - 内存对齐计算
+//! - `AtomicUsize` 与 `compare_exchange`（CAS 循环）
 
 #![cfg_attr(not(test), no_std)]
 
@@ -42,11 +42,11 @@ pub struct BumpAllocator {
 }
 
 impl BumpAllocator {
-    /// Create a new BumpAllocator.
+    /// 创建一个新的 BumpAllocator。
     ///
-    /// # Safety
-    /// `heap_start..heap_end` must be a valid, readable and writable memory region,
-    /// and must not be used by other code during this allocator's lifetime.
+    /// # 安全性
+    /// `heap_start..heap_end` 必须是合法、可读可写的内存区域，
+    /// 且在该分配器的生命周期内不能被其他代码使用。
     pub const unsafe fn new(heap_start: usize, heap_end: usize) -> Self {
         Self {
             heap_start,
@@ -55,7 +55,7 @@ impl BumpAllocator {
         }
     }
 
-    /// Reset the allocator (free all allocated memory).
+    /// 重置分配器（释放所有已分配内存）。
     pub fn reset(&self) {
         self.next.store(self.heap_start, Ordering::SeqCst);
     }
@@ -63,27 +63,42 @@ impl BumpAllocator {
 
 unsafe impl GlobalAlloc for BumpAllocator {
     unsafe fn alloc(&self, layout: Layout) -> *mut u8 {
-        // TODO: Implement bump allocation
-        //
-        // Steps:
-        // 1. Load current next (use Ordering::SeqCst)
-        // 2. Align next up to layout.align()
-        //    Hint: align_up(addr, align) = (addr + align - 1) & !(align - 1)
-        // 3. Compute allocation end = aligned + layout.size()
-        // 4. If end > heap_end, return null_mut()
-        // 5. Atomically update next to end using compare_exchange
-        //    (if CAS fails, another thread raced — retry in a loop)
-        // 6. Return the aligned address as a pointer
-        todo!()
+        let align = layout.align();//对齐指“地址必须是某个数的整数倍”返回的就是这个数
+        let size = layout.size();
+        let mut next = self.next.load(Ordering::SeqCst);
+
+        loop {
+            let aligned = match next.checked_add(align - 1) {
+                Some(v) => v & !(align - 1),
+                None => return null_mut(),
+            };
+
+            let end = match aligned.checked_add(size) {
+                Some(v) => v,
+                None => return null_mut(),
+            };
+
+            if end > self.heap_end {
+                return null_mut();
+            }
+
+            match self
+                .next
+                .compare_exchange(next, end, Ordering::SeqCst, Ordering::SeqCst)
+            {
+                Ok(_) => return aligned as *mut u8,
+                Err(actual) => next = actual,
+            }
+        }
     }
 
     unsafe fn dealloc(&self, _ptr: *mut u8, _layout: Layout) {
-        // Bump allocator does not reclaim individual objects — leave empty
+        // Bump 分配器不回收单个对象
     }
 }
 
 // ============================================================
-// Tests
+// 测试
 // ============================================================
 #[cfg(test)]
 mod tests {

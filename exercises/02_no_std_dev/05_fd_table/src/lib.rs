@@ -1,13 +1,13 @@
-//! # File Descriptor Table
+//! # 文件描述符表
 //!
-//! Implement a simple file descriptor (fd) table — the core data structure
-//! for managing open files in an OS kernel.
+//! 实现一个简单的文件描述符（fd）表——操作系统内核中
+//! 管理已打开文件的核心数据结构。
 //!
-//! ## Background
+//! ## 背景
 //!
-//! In the Linux kernel, each process has an fd table that maps integer fds to kernel file objects.
-//! User programs perform read/write/close via fds, and the kernel looks up the corresponding
-//! file object through the fd table.
+//! 在 Linux 内核中，每个进程都有一张 fd 表，把整数 fd 映射到内核文件对象。
+//! 用户程序通过 fd 执行 read/write/close，内核则通过 fd 表查到
+//! 对应的文件对象。
 //!
 //! ```text
 //! fd table:
@@ -19,73 +19,91 @@
 //!   5 -> Socket(...)
 //! ```
 //!
-//! ## Task
+//! ## 任务
 //!
-//! Implement the following methods on `FdTable`:
+//! 为 `FdTable` 实现以下方法：
 //!
-//! - `new()` — create an empty fd table
-//! - `alloc(file)` -> `usize` — allocate a new fd, return the fd number
-//!   - Prefer reusing the smallest closed fd number
-//!   - If no free slot, extend the table
-//! - `get(fd)` -> `Option<Arc<dyn File>>` — get the file object for an fd
-//! - `close(fd)` -> `bool` — close an fd, return whether it succeeded (false if fd doesn't exist)
-//! - `count()` -> `usize` — return the number of currently allocated fds (excluding closed ones)
+//! - `new()` —— 创建一个空的 fd 表
+//! - `alloc(file)` -> `usize` —— 分配一个新的 fd，返回 fd 编号
+//!   - 优先复用已关闭的最小 fd 编号
+//!   - 若没有空闲槽位，则扩展表
+//! - `get(fd)` -> `Option<Arc<dyn File>>` —— 取得 fd 对应的文件对象
+//! - `close(fd)` -> `bool` —— 关闭 fd，返回是否成功（fd 不存在时返回 false）
+//! - `count()` -> `usize` —— 返回当前已分配的 fd 数量（不含已关闭的）
 //!
-//! ## Key Concepts
+//! ## 关键概念
 //!
-//! - Trait objects: `Arc<dyn File>`
-//! - `Vec<Option<T>>` as a sparse table
-//! - fd number reuse strategy (find smallest free slot)
-//! - `Arc` reference counting and resource release
+//! - trait 对象：`Arc<dyn File>`
+//! - 用 `Vec<Option<T>>` 表示稀疏表
+//! - fd 编号复用策略（寻找最小的空闲槽位）
+//! - `Arc` 引用计数与资源释放
 
 use std::sync::Arc;
 
-/// File abstraction trait — all "files" in the kernel (regular files, pipes, sockets) implement this
+/// 文件抽象 trait —— 内核中所有“文件”（普通文件、管道、套接字）都实现它
 pub trait File: Send + Sync {
     fn read(&self, buf: &mut [u8]) -> isize;
     fn write(&self, buf: &[u8]) -> isize;
 }
 
-/// File descriptor table
+/// 文件描述符表
 pub struct FdTable {
-    // TODO: Design the internal structure
-    // Hint: use Vec<Option<Arc<dyn File>>>
-    //       the index is the fd number, None means the fd is closed or unallocated
+    // TODO: 设计内部结构
+    // 提示：使用 Vec<Option<Arc<dyn File>>>
+    //       下标即 fd 编号，None 表示该 fd 已关闭或未分配
+    entries: Vec<Option<Arc<dyn File>>>,
 }
 
 impl FdTable {
-    /// Create an empty fd table
+    /// 创建一个空的 fd 表
     pub fn new() -> Self {
-        // TODO
-        todo!()
+    
+         Self {
+            entries: Vec::new(),
+        }
     }
 
-    /// Allocate a new fd, return the fd number.
+    /// 分配一个新的 fd，返回 fd 编号。
     ///
-    /// Prefers reusing the smallest closed fd number; if no free slot, appends to the end.
+    /// 优先复用已关闭的最小 fd 编号；若没有空闲槽位，则追加到末尾。
     pub fn alloc(&mut self, file: Arc<dyn File>) -> usize {
         // TODO
-        todo!()
+        for (fd, slot) in self.entries.iter_mut().enumerate() {
+            if slot.is_none() {
+                *slot = Some(file);
+                return fd;
+            }
+        }
+
+        // 没有空槽，追加到末尾
+        let fd = self.entries.len();
+        self.entries.push(Some(file));
+        fd
     }
 
-    /// Get the file object for an fd. Returns None if the fd doesn't exist or is closed.
+    /// 取得 fd 对应的文件对象。fd 不存在或已关闭时返回 None。
     pub fn get(&self, fd: usize) -> Option<Arc<dyn File>> {
         // TODO
-        todo!()
+        self.entries.get(fd).and_then(|slot| slot.clone())
     }
 
-    /// Close an fd. Returns true on success, false if the fd doesn't exist or is already closed.
+    /// 关闭一个 fd。成功返回 true；fd 不存在或已关闭时返回 false。
     pub fn close(&mut self, fd: usize) -> bool {
         // TODO
-        todo!()
+        match self.entries.get_mut(fd) {
+            Some(slot) if slot.is_some() => {
+                *slot = None;
+                true
+            }
+            _ => false,
+        }
     }
 
-    /// Return the number of currently allocated fds (excluding closed ones)
+    /// 返回当前已分配的 fd 数量（不含已关闭的）
     pub fn count(&self) -> usize {
-        // TODO
-        todo!()
+        self.entries.iter().filter(|slot| slot.is_some()).count()
     }
-}
+    }
 
 impl Default for FdTable {
     fn default() -> Self {
@@ -94,7 +112,7 @@ impl Default for FdTable {
 }
 
 // ============================================================
-// Test File implementation
+// 测试用文件实现
 // ============================================================
 #[cfg(test)]
 mod tests {
@@ -167,7 +185,7 @@ mod tests {
             "get should return None after close"
         );
 
-        // Next allocation should reuse fd=1 (smallest free)
+        // 下一次分配应复用 fd=1（最小的空闲）
         let fd_new = table.alloc(MockFile::new(99));
         assert_eq!(fd_new, fd1, "should reuse the smallest closed fd");
 
